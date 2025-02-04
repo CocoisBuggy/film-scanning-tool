@@ -17,7 +17,6 @@ let
   LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath libraries}:${edsdkLib}";
 in
 python.pkgs.buildPythonPackage rec {
-  inherit LD_LIBRARY_PATH;
   pname = "edsdk";
   version = "0.1";
 
@@ -28,11 +27,12 @@ python.pkgs.buildPythonPackage rec {
     python.pkgs.setuptools # Needed to install Python extensions
   ] ++ libraries;
 
-  buildInputs = with pkgs; [
+  buildInputs = [
     python
     python.pkgs.pybind11
     stdenv.cc.cc
-    libdsk
+    pkgs.libdsk
+    pkgs.patchelf
   ];
 
   # Ensure correct linking
@@ -41,6 +41,19 @@ python.pkgs.buildPythonPackage rec {
 
   # Specify how to build the module
   doCheck = false; # Skip tests for now
+
+  # Install libEDSDK.so into the Python package's site-packages
+  preInstall = ''
+    mkdir -p $out/lib/python3.12/site-packages
+    cp ${edsdkLib} $out/lib/python3.12/site-packages/libEDSDK.so
+  '';
+
+  # After installation, patch the Python shared library
+  postInstall = ''
+    # Use patchelf to link edsdk.so to the python shared object
+    patchelf --set-rpath '$ORIGIN' $out/lib/python3.12/site-packages/edsdk.cpython-312-x86_64-linux-gnu.so
+    patchelf --add-needed libEDSDK.so $out/lib/python3.12/site-packages/edsdk.cpython-312-x86_64-linux-gnu.so
+  '';
 
   meta = {
     description = "Python bindings for Canon EDSDK using Pybind11";
