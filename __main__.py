@@ -10,11 +10,13 @@ async def main():
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
+    log = logging.getLogger(__name__)
+
     with EosSession() as session:
 
         @session.on
         def camera_added(camera):
-            print(camera)
+            log.info(f"discovered camera {camera.name} {camera.port}")
 
         await session.run()
 

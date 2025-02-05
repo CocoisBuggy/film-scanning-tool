@@ -8,8 +8,10 @@ from src.core import eospy
 
 class DeviceInfo(ctypes.Structure):
     _fields_ = [
-        ("szPortName", ctypes.c_char * 255),
-        ("szDeviceDescription", ctypes.c_char * 255),
+        ("szPortName", ctypes.c_char * 256),
+        ("szDeviceDescription", ctypes.c_char * 256),
+        ("deviceSubType", ctypes.c_uint32),
+        ("reserved", ctypes.c_uint32),
     ]
 
 
@@ -20,6 +22,7 @@ class Image:
 class Camera:
     reference: ctypes.c_ulong
     name: str
+    port: str
 
     def __init__(self, reference: ctypes.c_ulong):
         self.reference = reference
@@ -27,9 +30,9 @@ class Camera:
         info = DeviceInfo()
         eospy.get_device_info(self.reference, ctypes.byref(info))
 
-        self.name = ""
+        self.name = str(info.szDeviceDescription.decode("utf8"))
+        self.port = str(info.szPortName.decode("utf8"))
         self.viewfinder = cv2.namedWindow(f"{self.name} Viewfinder", cv2.WINDOW_NORMAL)
-        pass
 
     def snap(self) -> Image:
         pass

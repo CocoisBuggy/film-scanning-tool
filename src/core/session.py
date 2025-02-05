@@ -12,8 +12,7 @@ camera_added_evt = asyncio.Event()
 
 
 @callback(ctypes.c_ulong, ctypes.c_voidp)
-def camera_added_evt_handler(ctx, other):
-    log.info(f"Camera has been added! {ctx} {other}")
+def camera_added_evt_handler(*_):
     camera_added_evt.set()
 
 
