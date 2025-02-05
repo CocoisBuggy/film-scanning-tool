@@ -1,23 +1,40 @@
-with import <nixpkgs> { };
+{
+  pkgs ? import <nixpkgs> { },
+}:
 let
-  edsdk = import ./edsdk-module { inherit pkgs; };
+  inherit (pkgs) mkShell;
+
+  libraries = with pkgs; [
+    glib
+    glib.dev
+    stdenv.cc.cc.lib
+    clang
+    clang.libc
+    libusb1
+  ];
+
+  LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath libraries}";
 in
 mkShell {
-  LD_LIBRARY_PATH = "${
-    lib.makeLibraryPath [
-      libusb1
-      stdenv.cc.cc
-    ]
-  }:${./edsdk-module/lib/libEDSDK.so}";
-  buildInputs = [
-    pre-commit
-    uv
-
-    edsdk
+  inherit LD_LIBRARY_PATH;
+  buildInputs = with pkgs; [
+    opencv
+    pkg-config
+    libusb1
+    glibc
     (python3.withPackages (
       ps: with ps; [
-        pybind11
+        cffi
+        inflection
+        (ps.opencv4.override {
+          enableGtk3 = true;
+        })
       ]
     ))
   ];
+
+  shellHook = ''
+    gcc -E -P ./include/EDSDK.h -o ./include/EDSDK_preprocessed.h
+    echo "post GCC preprocessing"
+  '';
 }

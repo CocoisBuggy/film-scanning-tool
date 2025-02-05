@@ -1,12 +1,23 @@
-import edsdk
+import asyncio
+import logging
 
 from src.core.session import EosSession
 
-if __name__ == "__main__":
+
+async def main():
+    logging.basicConfig(
+        level=logging.DEBUG,
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
     with EosSession() as session:
 
         @session.on
-        def camera_connected(camera):
+        def camera_added(camera):
             print(camera)
 
-        session.connect()
+        await session.run()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

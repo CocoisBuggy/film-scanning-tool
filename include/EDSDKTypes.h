@@ -11,7 +11,7 @@
 *   Copyright Canon Inc. 2006-2024 All Rights Reserved                        *
 *                                                                             *
 ******************************************************************************/
-// #include "edsdk_fix.h"
+#include "edsdk_fix.h"
 
 #ifndef _EDS_TYPES_H_
 #define _EDS_TYPES_H_
