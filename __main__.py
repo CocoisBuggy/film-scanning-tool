@@ -7,29 +7,29 @@ import numpy as np
 
 from src.core.camera import Camera
 from src.core.session import EosSession
+from src.model.feature import detect_objects_and_draw_boxes
+
+log = logging.getLogger(__name__)
 
 
 async def camera_loop(camera: Camera):
-    with camera:
+    async with camera:
         async for image in camera.stream():
-            nparr = np.frombuffer(image, np.uint8)
-            # Decode the numpy array into an image
-            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            frame = detect_objects_and_draw_boxes(image)
             cv2.imshow(camera.viewfinder, frame)
 
             key = cv2.waitKey(1)  # Check for key presses while updating.
             if key == ord("q"):  # If 'q' is pressed
-                print("Quitting")
+                log.debug("cv2 recieved a quit signal")
                 break
 
 
 async def main():
     logging.basicConfig(
         level=logging.DEBUG,
+        format="%(name)s - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
-
-    log = logging.getLogger(__name__)
 
     with EosSession() as session:
 

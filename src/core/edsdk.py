@@ -1,11 +1,8 @@
-import ctypes
-import functools
 import logging
+import os
 
 import inflection
 from cffi import FFI
-
-from src.core.exception import intercept
 
 log = logging.getLogger(__name__)
 
@@ -14,7 +11,7 @@ with open("./include/EDSDK_preprocessed.h") as f:
     c_header = f.read()
     ffi.cdef(c_header)
 
-clib = ffi.dlopen("./lib/libEDSDK.so")
+clib = ffi.dlopen(os.path.abspath("./lib/libEDSDK.so"))
 
 
 wrapped = """

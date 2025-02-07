@@ -1,5 +1,9 @@
 {
-  pkgs ? import <nixpkgs> { },
+  pkgs ? import <nixpkgs> {
+    config = {
+      allowUnfree = true;
+    };
+  },
 }:
 let
   inherit (pkgs) mkShell;
@@ -18,11 +22,12 @@ in
 mkShell {
   inherit LD_LIBRARY_PATH;
   buildInputs = with pkgs; [
+    virtualenv
     opencv
     pkg-config
     libusb1
     glibc
-    libjpeg
+    cudatoolkit
     (python3.withPackages (
       ps: with ps; [
         matplotlib
@@ -38,5 +43,14 @@ mkShell {
   shellHook = ''
     gcc -E -P ./include/EDSDK.h -o ./include/EDSDK_preprocessed.h
     echo "post GCC preprocessing"
+
+    ${pkgs.virtualenv}/bin/virtualenv .venv
+    source .venv/bin/activate
+
+    export CUDA_PATH=${pkgs.cudatoolkit}
+    export LD_LIBRARY_PATH=/run/opengl-driver/lib:${LD_LIBRARY_PATH}
+    export EXTRA_LDFLAGS="-L/lib -L${pkgs.cudatoolkit}/lib"
+
+    pip install torch numpy transformers accelerate timm
   '';
 }

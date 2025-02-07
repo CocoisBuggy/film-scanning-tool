@@ -4,13 +4,18 @@ import logging
 from typing import AsyncGenerator
 
 import cv2
+import matplotlib.pyplot as plt
 import numpy as np
 
 from src.core import eospy
 from src.core.property import EosPropID, PropertyEvent
 from src.core.tools import callback
 
+from .command import (EdsCameraCommand, EdsCameraStatusCommand,
+                      EdsShutterButton, StateEvent)
 from .image import EdsSize, Image
+
+opened = 0
 
 
 class DeviceInfo(ctypes.Structure):
@@ -27,6 +32,7 @@ class Camera:
     name: str
     port: str
     queue: asyncio.Queue[EosPropID]
+    status: asyncio.Queue[StateEvent]
 
     def __init__(self, reference: ctypes.c_ulong):
         self.reference = reference
@@ -40,6 +46,9 @@ class Camera:
         self.log = logging.getLogger(f"{__name__}:{self.name}")
         cv2.namedWindow(f"{self.name} Viewfinder", cv2.WINDOW_NORMAL)
         self.viewfinder = f"{self.name} Viewfinder"
+
+        # Each camera will have its own figure references.
+        self.fig, self.axes = plt.subplots(nrows=2, ncols=2)
 
     async def get_property(self, property: EosPropID):
         prop_output = ctypes.c_uint32()
@@ -72,8 +81,23 @@ class Camera:
                 self.queue.task_done()
                 break
 
-    async def send_command(self):
-        pass
+    async def send_command(
+        self,
+        cmd: EdsCameraCommand | EdsShutterButton | EdsCameraStatusCommand,
+        param: int = 0,
+    ):
+        self.log.debug(f"Will dispatch command {cmd} ({cmd.value})")
+
+        if isinstance(cmd, EdsCameraStatusCommand):
+            eospy.send_status_command(
+                self.reference,
+                ctypes.c_uint32(cmd.value),
+                ctypes.c_uint32(param),
+            )
+        elif isinstance(cmd, EdsCameraCommand):
+            eospy.send_command(
+                self.reference, ctypes.c_uint32(cmd.value), ctypes.c_uint32(param)
+            )
 
     async def snap(self) -> Image:
         return Image()
@@ -113,12 +137,15 @@ class Camera:
                     eospy.release(evf_image)
                     yield data
 
+                # We wanna plop the frame into the frame data
+                plt.pause(0.001)
+
             except Exception as e:
                 self.log.error(e)
 
             await asyncio.sleep(0.1)
 
-    def __enter__(self, *args):
+    async def __aenter__(self, *args):
         @callback(ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_voidp)
         def __property_event_handler(evt, prop_id, inparam, _):
             [evt_type] = [t for t in PropertyEvent if t.value == evt]
@@ -126,9 +153,15 @@ class Camera:
             self.log.debug(f"property change event, {evt_type} {prop}")
             self.queue.put_nowait(prop)
 
+        @callback(ctypes.c_uint, ctypes.c_uint, ctypes.c_voidp)
+        def __status_event_handler(evt, data):
+            [evt_type] = [t for t in PropertyEvent if t.value == evt]
+            self.log.debug(f"camera status changed: {evt_type} {data}")
+
         self.log.debug("Opening session to camera")
         eospy.open_session(self.reference)
-        # We listen to notifications of property change.
+
+        # We listen to notifications of property change
         eospy.set_property_event_handler(
             self.reference,
             ctypes.c_uint32(PropertyEvent._All.value),
@@ -136,13 +169,25 @@ class Camera:
             None,
         )
 
+        eospy.set_camera_state_event_handler(
+            self.reference,
+            ctypes.c_uint32(StateEvent.All.value),
+            __status_event_handler,
+            None,
+        )
+
+        self.__status_event_handler = __status_event_handler
         self.__property_event_handler = __property_event_handler
+
+        await self.send_command(EdsCameraCommand.DoEvfAf)
+
         return self
 
-    def __exit__(self, *args):
+    async def __aexit__(self, *args):
         self.log.debug("Closing session with camera")
         eospy.close_session(self.reference)
         cv2.destroyWindow(self.viewfinder)
+        plt.close(self.fig)  # close plot
 
         try:
             while self.queue.get_nowait():
