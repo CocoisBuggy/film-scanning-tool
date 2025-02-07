@@ -4,10 +4,13 @@ import logging
 from typing import AsyncGenerator
 
 import cv2
+import numpy as np
 
 from src.core import eospy
 from src.core.property import EosPropID, PropertyEvent
 from src.core.tools import callback
+
+from .image import EdsSize, Image
 
 
 class DeviceInfo(ctypes.Structure):
@@ -17,10 +20,6 @@ class DeviceInfo(ctypes.Structure):
         ("deviceSubType", ctypes.c_uint32),
         ("reserved", ctypes.c_uint32),
     ]
-
-
-class Image:
-    pass
 
 
 class Camera:
@@ -81,26 +80,41 @@ class Camera:
 
     async def stream(self) -> AsyncGenerator[bytes, None]:
         device = await self.get_property(EosPropID.Evf_OutputDevice)
-        device |= 2  # we are specifying that we want the live feed diverted to the PC
-
-        await self.set_property(EosPropID.Evf_OutputDevice, device)
-
-        stream_ref = ctypes.c_voidp()
-        evf_image = ctypes.c_voidp()
-
-        eospy.create_memory_stream(0, ctypes.byref(stream_ref))
-        eospy.create_evf_image_ref(stream_ref, ctypes.byref(evf_image))
-
-        await asyncio.sleep(1)
+        await self.set_property(EosPropID.Evf_OutputDevice, device | 2)
+        assert await self.get_property(EosPropID.Evf_OutputDevice) & 2 == 2
 
         # Set the live view property
         while True:
-            eospy.download_evf_image(self.reference, evf_image)
+            try:
+                stream_ref = ctypes.c_voidp()
+                evf_image = ctypes.c_voidp()
+                stream_length = ctypes.c_uint32()
+                data_p = ctypes.c_voidp()
 
-            if stream_ref.value is not None:
-                # Find number of bytes required
-                size = (stream_ref.value.bit_length() + 7) // 8
-                yield stream_ref.value.to_bytes(size, "big")
+                eospy.create_memory_stream(ctypes.c_uint32(0), ctypes.byref(stream_ref))
+                eospy.create_evf_image_ref(stream_ref, ctypes.byref(evf_image))
+                eospy.download_evf_image(self.reference, evf_image)
+                eospy.get_pointer(stream_ref, ctypes.byref(data_p))
+                eospy.get_length(stream_ref, ctypes.byref(stream_length))
+
+                if evf_image.value is not None:
+                    data = ctypes.string_at(data_p, stream_length.value)
+                    assert len(data) == stream_length.value
+                    assert len(data) > 128_00  # I chose this number arbitrarily
+
+                    image_data = np.ctypeslib.as_array(
+                        ctypes.cast(data_p, ctypes.POINTER(ctypes.c_ubyte)),
+                        shape=(stream_length.value,),
+                    )
+                    image_bytes = bytes(image_data)
+                    assert len(image_bytes) == len(data)
+
+                    eospy.release(stream_ref)
+                    eospy.release(evf_image)
+                    yield data
+
+            except Exception as e:
+                self.log.error(e)
 
             await asyncio.sleep(0.1)
 
@@ -128,7 +142,7 @@ class Camera:
     def __exit__(self, *args):
         self.log.debug("Closing session with camera")
         eospy.close_session(self.reference)
-        cv2.destroyAllWindows()
+        cv2.destroyWindow(self.viewfinder)
 
         try:
             while self.queue.get_nowait():

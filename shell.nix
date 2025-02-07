@@ -22,8 +22,10 @@ mkShell {
     pkg-config
     libusb1
     glibc
+    libjpeg
     (python3.withPackages (
       ps: with ps; [
+        matplotlib
         cffi
         inflection
         (ps.opencv4.override {
