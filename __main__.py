@@ -12,16 +12,12 @@ from src.core.session import EosSession
 async def camera_loop(camera: Camera):
     with camera:
         async for image in camera.stream():
-            with open("test.jpg", "wb") as f:
-                f.write(image)
-
             nparr = np.frombuffer(image, np.uint8)
             # Decode the numpy array into an image
             frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             cv2.imshow(camera.viewfinder, frame)
 
             key = cv2.waitKey(1)  # Check for key presses while updating.
-            print(key)
             if key == ord("q"):  # If 'q' is pressed
                 print("Quitting")
                 break
