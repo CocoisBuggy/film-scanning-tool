@@ -2,3 +2,4 @@ sdk
 lib
 **__pycache__
 test.jpg
+*.log

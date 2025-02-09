@@ -30,9 +30,12 @@ mkShell {
     cudatoolkit
     (python3.withPackages (
       ps: with ps; [
+        textual
+        watchdog
         matplotlib
         cffi
         inflection
+        scikit-image
         (ps.opencv4.override {
           enableGtk3 = true;
         })

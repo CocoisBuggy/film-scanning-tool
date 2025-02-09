@@ -17,7 +17,7 @@ def camera_added_evt_handler(*_):
 
 
 class EosSession:
-    cameras = []
+    cameras: list[Camera] = []
     handlers = {"camera_added": []}
 
     def __init__(self):
@@ -68,6 +68,9 @@ class EosSession:
 
     def disconnect(self, signal, _):
         log.debug(f"recieved sys signal {signal}")
+        for camera in self.cameras:
+            camera.disconnect()
+
         self.connected = False
 
     async def run(self):

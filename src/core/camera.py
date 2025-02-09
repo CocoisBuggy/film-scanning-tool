@@ -4,7 +4,6 @@ import logging
 from typing import AsyncGenerator
 
 import cv2
-import matplotlib.pyplot as plt
 import numpy as np
 
 from src.core import eospy
@@ -14,8 +13,6 @@ from src.core.tools import callback
 from .command import (EdsCameraCommand, EdsCameraStatusCommand,
                       EdsShutterButton, StateEvent)
 from .image import EdsSize, Image
-
-opened = 0
 
 
 class DeviceInfo(ctypes.Structure):
@@ -46,9 +43,6 @@ class Camera:
         self.log = logging.getLogger(f"{__name__}:{self.name}")
         cv2.namedWindow(f"{self.name} Viewfinder", cv2.WINDOW_NORMAL)
         self.viewfinder = f"{self.name} Viewfinder"
-
-        # Each camera will have its own figure references.
-        self.fig, self.axes = plt.subplots(nrows=2, ncols=2)
 
     async def get_property(self, property: EosPropID):
         prop_output = ctypes.c_uint32()
@@ -102,7 +96,8 @@ class Camera:
     async def snap(self) -> Image:
         return Image()
 
-    async def stream(self) -> AsyncGenerator[bytes, None]:
+    async def live_view_stream(self) -> AsyncGenerator[bytes, None]:
+        """ """
         device = await self.get_property(EosPropID.Evf_OutputDevice)
         await self.set_property(EosPropID.Evf_OutputDevice, device | 2)
         assert await self.get_property(EosPropID.Evf_OutputDevice) & 2 == 2
@@ -137,9 +132,6 @@ class Camera:
                     eospy.release(evf_image)
                     yield data
 
-                # We wanna plop the frame into the frame data
-                plt.pause(0.001)
-
             except Exception as e:
                 self.log.error(e)
 
@@ -154,9 +146,21 @@ class Camera:
             self.queue.put_nowait(prop)
 
         @callback(ctypes.c_uint, ctypes.c_uint, ctypes.c_voidp)
-        def __status_event_handler(evt, data):
+        def __status_event_handler(evt, data, *_):
             [evt_type] = [t for t in PropertyEvent if t.value == evt]
             self.log.debug(f"camera status changed: {evt_type} {data}")
+
+            if evt_type == StateEvent.Shutdown:
+                self.log.info("Recieved a shutdown event from the camera")
+            elif evt_type == StateEvent.ShutDownTimerUpdate:
+                self.log.debug("Camera has notified of a change to the shutdown timer")
+            elif evt_type == StateEvent.WillSoonShutDown:
+                self.log.debug(
+                    "Camera will soon shut down - Extending camera shutdown timer"
+                )
+                asyncio.get_event_loop().create_task(
+                    self.send_command(EdsCameraCommand.ExtendShutDownTimer)
+                )
 
         self.log.debug("Opening session to camera")
         eospy.open_session(self.reference)
@@ -180,14 +184,12 @@ class Camera:
         self.__property_event_handler = __property_event_handler
 
         await self.send_command(EdsCameraCommand.DoEvfAf)
-
         return self
 
     async def __aexit__(self, *args):
         self.log.debug("Closing session with camera")
         eospy.close_session(self.reference)
         cv2.destroyWindow(self.viewfinder)
-        plt.close(self.fig)  # close plot
 
         try:
             while self.queue.get_nowait():

@@ -3,6 +3,7 @@ import io
 import cv2
 import numpy as np
 import torch
+from cv2.typing import MatLike
 from PIL import Image
 from transformers import DetrFeatureExtractor, DetrForObjectDetection
 
@@ -11,7 +12,9 @@ feature_extractor = DetrFeatureExtractor.from_pretrained(model_name)
 model = DetrForObjectDetection.from_pretrained(model_name).to("cuda")
 
 
-def detect_objects_and_draw_boxes(image_bytes, model_name="facebook/detr-resnet-50"):
+def detect_objects_and_draw_boxes(
+    image_bytes,
+) -> tuple[MatLike, list[tuple[tuple[int, int, int, int], str, float]]]:
     """
     Detects objects in an image using a pre-trained DETR model, draws bounding boxes
     and labels around the detected objects, and displays the image using OpenCV.
@@ -32,24 +35,29 @@ def detect_objects_and_draw_boxes(image_bytes, model_name="facebook/detr-resnet-
         print(f"Error decoding image bytes: {e}")
         return
 
-    inputs = feature_extractor(images=image, return_tensors="pt")
+    inputs = feature_extractor(images=image, return_tensors="pt").to("cuda")
     # Forward pass through the model
     with torch.no_grad():
-        outputs = model(**inputs)
+        with torch.amp.autocast("cuda"):
+            outputs = model(**inputs)
 
-    # Post-process the outputs
-    target_sizes = torch.tensor(
-        [image.size[::-1]]
-    )  # Reverse image size (height, width)
+    # Post-process the output
+    # Reverse image size (height, width)s
+    target_sizes = torch.tensor([image.size[::-1]])
 
     post_processed_outputs = feature_extractor.post_process_object_detection(
-        outputs, target_sizes=target_sizes, threshold=0.8
+        outputs,
+        target_sizes=target_sizes,
+        threshold=0.8,
     )
 
     # Get bounding boxes, labels, and scores
-    boxes = post_processed_outputs[0]["boxes"].detach().numpy()
-    labels = post_processed_outputs[0]["labels"].detach().numpy()
-    scores = post_processed_outputs[0]["scores"].detach().numpy()
+    boxes = post_processed_outputs[0]["boxes"].detach().cpu().numpy()
+    scores = post_processed_outputs[0]["scores"].detach().cpu().numpy()
+    labels = [
+        model.config.id2label[label]
+        for label in post_processed_outputs[0]["labels"].detach().cpu().numpy()
+    ]
 
     # Convert PIL Image to OpenCV format
     open_cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
@@ -62,10 +70,10 @@ def detect_objects_and_draw_boxes(image_bytes, model_name="facebook/detr-resnet-
         cv2.rectangle(
             open_cv_image, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2
         )  # Green box
-        label_text = model.config.id2label[label]  # Get class name
+
         cv2.putText(
             open_cv_image,
-            f"{label_text} {score:.2f}",
+            f"{label} {score:.2f}",
             (xmin, ymin - 10),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
@@ -73,4 +81,4 @@ def detect_objects_and_draw_boxes(image_bytes, model_name="facebook/detr-resnet-
             2,
         )
 
-    return open_cv_image
+    return open_cv_image, list(zip(boxes, labels, scores))
