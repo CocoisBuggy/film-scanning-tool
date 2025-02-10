@@ -1,3 +1,4 @@
+import asyncio
 import io
 
 import cv2
@@ -5,6 +6,7 @@ import numpy as np
 import torch
 from cv2.typing import MatLike
 from PIL import Image
+from PIL.ImageFile import ImageFile
 from transformers import DetrFeatureExtractor, DetrForObjectDetection
 
 model_name = "facebook/detr-resnet-50"
@@ -12,9 +14,28 @@ feature_extractor = DetrFeatureExtractor.from_pretrained(model_name)
 model = DetrForObjectDetection.from_pretrained(model_name).to("cuda")
 
 
-def detect_objects_and_draw_boxes(
-    image_bytes,
-) -> tuple[MatLike, list[tuple[tuple[int, int, int, int], str, float]]]:
+def model_inference(inputs):
+    with torch.no_grad():
+        with torch.amp.autocast("cuda"):
+            return model(**inputs)
+
+
+async def run_inference(inputs):
+    # Offload the synchronous model_inference to a worker thread.
+    outputs = await asyncio.to_thread(model_inference, inputs)
+    return outputs
+
+
+async def features(images: ImageFile):
+    def work():
+        return feature_extractor(images=images, return_tensors="pt").to("cuda")
+
+    return await asyncio.to_thread(work)
+
+
+async def detect_objects_and_draw_boxes(
+    image: ImageFile, frame: MatLike
+) -> list[tuple[tuple[int, int, int, int], str, float]]:
     """
     Detects objects in an image using a pre-trained DETR model, draws bounding boxes
     and labels around the detected objects, and displays the image using OpenCV.
@@ -27,19 +48,8 @@ def detect_objects_and_draw_boxes(
     Returns:
         None. Displays the image with bounding boxes using cv2.imshow().
     """
-
-    try:
-        # Decode bytes to PIL Image
-        image = Image.open(io.BytesIO(image_bytes))  # Use io.BytesIO
-    except Exception as e:  # Catch potential decoding errors
-        print(f"Error decoding image bytes: {e}")
-        return
-
-    inputs = feature_extractor(images=image, return_tensors="pt").to("cuda")
     # Forward pass through the model
-    with torch.no_grad():
-        with torch.amp.autocast("cuda"):
-            outputs = model(**inputs)
+    outputs = await run_inference(await features(image))
 
     # Post-process the output
     # Reverse image size (height, width)s
@@ -59,20 +69,15 @@ def detect_objects_and_draw_boxes(
         for label in post_processed_outputs[0]["labels"].detach().cpu().numpy()
     ]
 
-    # Convert PIL Image to OpenCV format
-    open_cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-
     # Draw bounding boxes and labels
     for box, label, score in zip(boxes, labels, scores):
         xmin, ymin, xmax, ymax = box
         xmin, ymin, xmax, ymax = int(xmin), int(ymin), int(xmax), int(ymax)
 
-        cv2.rectangle(
-            open_cv_image, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2
-        )  # Green box
+        cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2)  # Green box
 
         cv2.putText(
-            open_cv_image,
+            frame,
             f"{label} {score:.2f}",
             (xmin, ymin - 10),
             cv2.FONT_HERSHEY_SIMPLEX,
@@ -81,4 +86,4 @@ def detect_objects_and_draw_boxes(
             2,
         )
 
-    return open_cv_image, list(zip(boxes, labels, scores))
+    return list(zip(boxes, labels, scores))

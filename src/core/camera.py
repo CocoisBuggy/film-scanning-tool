@@ -12,7 +12,7 @@ from src.core.tools import callback
 
 from .command import (EdsCameraCommand, EdsCameraStatusCommand,
                       EdsShutterButton, StateEvent)
-from .image import EdsSize, Image
+from .image import Image
 
 
 class DeviceInfo(ctypes.Structure):
@@ -93,7 +93,12 @@ class Camera:
                 self.reference, ctypes.c_uint32(cmd.value), ctypes.c_uint32(param)
             )
 
-    async def snap(self) -> Image:
+    async def snap(self, prefocus=True) -> Image:
+        """
+        Take a photo and download its content. We do not want this image to write onto
+        the camera, but rather write straight into the host machine.
+        """
+        raise NotImplementedError("oopers")
         return Image()
 
     async def live_view_stream(self) -> AsyncGenerator[bytes, None]:
