@@ -2,9 +2,7 @@ import asyncio
 import logging
 
 from src.cli.app import EosApp
-from src.core.camera import Camera
 from src.core.session import EosSession
-from src.model.feature import detect_objects_and_draw_boxes
 
 log = logging.getLogger(__name__)
 

@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 
 from src.core import eospy
-from src.core.property import EosPropID, PropertyEvent
+from src.core.property import DeviceOutput, EosPropID, PropertyEvent
 from src.core.tools import callback
 
 from .command import (EdsCameraCommand, EdsCameraStatusCommand,
@@ -98,14 +98,19 @@ class Camera:
         Take a photo and download its content. We do not want this image to write onto
         the camera, but rather write straight into the host machine.
         """
-        raise NotImplementedError("oopers")
+        if prefocus:
+            await self.send_command(EdsCameraCommand.DoEvfAf)
+
+        await self.send_command(EdsCameraCommand.TakePicture)
+        raise NotImplemented
         return Image()
 
     async def live_view_stream(self) -> AsyncGenerator[bytes, None]:
         """ """
-        device = await self.get_property(EosPropID.Evf_OutputDevice)
-        await self.set_property(EosPropID.Evf_OutputDevice, device | 2)
-        assert await self.get_property(EosPropID.Evf_OutputDevice) & 2 == 2
+        await self.set_property(
+            EosPropID.Evf_OutputDevice,
+            DeviceOutput.Pc.value | DeviceOutput.Camera.value,
+        )
 
         # Set the live view property
         while True:
@@ -188,7 +193,6 @@ class Camera:
         self.__status_event_handler = __status_event_handler
         self.__property_event_handler = __property_event_handler
 
-        await self.send_command(EdsCameraCommand.DoEvfAf)
         return self
 
     async def __aexit__(self, *args):

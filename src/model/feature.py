@@ -33,9 +33,30 @@ async def features(images: ImageFile):
     return await asyncio.to_thread(work)
 
 
-async def detect_objects_and_draw_boxes(
-    image: ImageFile, frame: MatLike
-) -> list[tuple[tuple[int, int, int, int], str, float]]:
+type Objects = list[tuple[tuple[int, int, int, int], str, float]]
+
+
+def draw_object_borders(frame: MatLike, objects: Objects):
+    # Draw bounding boxes and labels
+    for box, label, score in objects:
+        xmin, ymin, xmax, ymax = box
+        xmin, ymin, xmax, ymax = int(xmin), int(ymin), int(xmax), int(ymax)
+
+        cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2)  # Green box
+        cv2.putText(
+            frame,
+            f"{label} {score:.2f}",
+            (xmin, ymin - 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 255, 0),
+            2,
+        )
+
+
+async def detect_objects(
+    image: ImageFile,
+) -> Objects:
     """
     Detects objects in an image using a pre-trained DETR model, draws bounding boxes
     and labels around the detected objects, and displays the image using OpenCV.
@@ -68,22 +89,5 @@ async def detect_objects_and_draw_boxes(
         model.config.id2label[label]
         for label in post_processed_outputs[0]["labels"].detach().cpu().numpy()
     ]
-
-    # Draw bounding boxes and labels
-    for box, label, score in zip(boxes, labels, scores):
-        xmin, ymin, xmax, ymax = box
-        xmin, ymin, xmax, ymax = int(xmin), int(ymin), int(xmax), int(ymax)
-
-        cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2)  # Green box
-
-        cv2.putText(
-            frame,
-            f"{label} {score:.2f}",
-            (xmin, ymin - 10),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (0, 255, 0),
-            2,
-        )
 
     return list(zip(boxes, labels, scores))

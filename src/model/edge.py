@@ -10,81 +10,72 @@ from skimage.draw import line
 log = logging.getLogger(__name__)
 
 
-def _draw_border_lines(img: MatLike, threshold=10, tolerance=5):
+def cast_ray_cv(img: MatLike, start, direction, cast_distance=100):
     """
-    Detect if there is black border (overflow) by comparing the content's bounding box to the image edges.
+    Cast a ray in a given direction until a non-black pixel is found.
 
-    Parameters:
-      img: Input image (BGR or grayscale).
-      threshold: Pixel intensity threshold for determining non-black content.
-      tolerance: Number of pixels allowed for a border to be considered "flush" with the image edge.
-
-    Returns:
-      A tuple (has_border, bbox) where:
-         - has_border is True if the content's bounding box does not extend to the image edges.
-         - bbox is (x, y, w, h) of the detected content region.
+    :param image_path: Path to the image file
+    :param start: (x, y) start position
+    :param direction: (dx, dy) direction to move
+    :return: (x, y) of first non-black pixel or None if none found
     """
-    if len(img.shape) == 3:
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    else:
-        gray = img
+    x, y = start
+    dx, dy = direction
 
-    # Create a binary image: content=255, near-black background=0.
-    _, binary = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
+    while 0 <= x < cast_distance and 0 <= y < cast_distance:
+        if int(img[y, x]) > 10:
+            return (x, y)
 
-    # Find external contours.
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        x += dx
+        y += dy
 
-    if not contours:
-        return (False, None)  # No content detected.
+    return None
 
-    # Assume the largest contour is the content.
-    content_contour = max(contours, key=cv2.contourArea)
 
-    # Compute the bounding rectangle of the content.
-    x, y, w, h = cv2.boundingRect(content_contour)
-    bbox = (x, y, w, h)
+def _draw_border_lines(img: MatLike, threshold=10, tolerance=5, sample_density=100):
+    """
+    My simple heuristic algorithm for determining if there is some bad edge to a
+    given candidate image.
+    """
+    img = cv2.cvtColor(img, cv2.IMREAD_GRAYSCALE)
 
-    H, W = gray.shape
-    # Check each edge: if the content does not reach the image's edge (within tolerance),
-    # then there is a black border.
-    left_gap = x
-    top_gap = y
-    right_gap = W - (x + w)
-    bottom_gap = H - (y + h)
+    height, width, _ = img.shape
+    width_step = width // sample_density
+    height_step = height // sample_density
 
-    has_border = (
-        left_gap > tolerance
-        or top_gap > tolerance
-        or right_gap > tolerance
-        or bottom_gap > tolerance
-    )
-
-    if has_border:
-        cv2.drawContours(img, [content_contour], -1, (0, 0, 255), 2)
-
-    return has_border
+    for ax in range(-1, 1):
+        for ay in range(-1, 1):
+            # ax and ay give us our scan directions and which edge we are to examine.
+            for sample in range(sample_density):
+                # draw lines.
+                x = width_step * sample * ax
+                y = height_step * sample * ay
+                ray = cast_ray_cv(img, (x, y), (ax, ay))
+                if ray is not None:
+                    cv2.line(img, (x, y), ray, (0, 0, 255), 2)
 
 
 def _data_in_frame_center(frame: MatLike, threshold=10):
     height, width, _ = frame.shape
+
+    box_height: int = int(height // 1.5)
     box_width: int = int(width // 2)
 
     # Compute the top-left corner for centering.
     start_x: int = (width - box_width) // 2
-    start_y: int = 0
+    start_y: int = (height - box_height) // 2
 
     # Extract the central region
-    central_box = frame[start_y : start_y + height, start_x : start_x + box_width]
+    central_box = frame[start_y : start_y + box_height, start_x : start_x + box_width]
 
     proportion_near_black = np.mean(np.less(central_box, threshold))
-    passing = proportion_near_black < 0.5
+    passing = proportion_near_black < 0.7
 
     if not passing:
         cv2.rectangle(
             frame,
             (start_x, start_y),
-            (start_x + box_width, start_y + height),
+            (start_x + box_width, start_y + box_height),
             (255, 0, 0),
             2,
         )
@@ -102,8 +93,8 @@ def _data_in_frame_center(frame: MatLike, threshold=10):
     return passing
 
 
-async def data_in_frame_center(frame: MatLike, threshold=10):
-    return await asyncio.to_thread(_data_in_frame_center, frame, threshold=threshold)
+async def data_in_frame_center(frame: MatLike, **kwargs):
+    return await asyncio.to_thread(_data_in_frame_center, frame, **kwargs)
 
 
 async def draw_border_lines(frame: MatLike, threshold=10, tolerance=5):

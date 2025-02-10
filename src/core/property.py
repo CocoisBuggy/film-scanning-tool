@@ -144,3 +144,9 @@ class PropertyEvent(Enum):
     _All = 0x100
     Changed = 0x101
     DescChanged = 0x102
+
+
+class DeviceOutput(Enum):
+    Camera = 0x01
+    Pc = 0x10
+    PcSmall = 0x08
