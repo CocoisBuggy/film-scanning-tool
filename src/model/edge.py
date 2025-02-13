@@ -1,16 +1,20 @@
 import asyncio
 import logging
-import math
 
 import cv2
 import numpy as np
 from cv2.typing import MatLike, Point
-from skimage.draw import line
 
 log = logging.getLogger(__name__)
 
 
-def cast_ray_cv(img: MatLike, start, direction, cast_distance=100):
+def cast_ray_cv(
+    img: MatLike,
+    start: Point,
+    direction: Point,
+    threshold: int,
+    cast_distance=100,
+) -> Point | None:
     """
     Cast a ray in a given direction until a non-black pixel is found.
 
@@ -21,38 +25,67 @@ def cast_ray_cv(img: MatLike, start, direction, cast_distance=100):
     """
     x, y = start
     dx, dy = direction
+    translation = 0
 
-    while 0 <= x < cast_distance and 0 <= y < cast_distance:
-        if int(img[y, x]) > 10:
+    while translation < cast_distance:
+        log.debug(y, x)
+        r, g, b, _ = img[y, x]
+        luminosity = 0.299 * r + 0.587 * g + 0.114 * b
+
+        if luminosity > threshold:
+            if translation < 5:
+                return
+
             return (x, y)
 
         x += dx
         y += dy
+        translation += 1
 
-    return None
+    return x, y
 
 
-def _draw_border_lines(img: MatLike, threshold=10, tolerance=5, sample_density=100):
+def _draw_border_lines(img: MatLike, threshold=50, sample_density=40):
     """
     My simple heuristic algorithm for determining if there is some bad edge to a
     given candidate image.
     """
-    img = cv2.cvtColor(img, cv2.IMREAD_GRAYSCALE)
+    gray_img = cv2.cvtColor(img, cv2.IMREAD_GRAYSCALE)
 
-    height, width, _ = img.shape
+    height, width, _ = gray_img.shape
     width_step = width // sample_density
     height_step = height // sample_density
 
-    for ax in range(-1, 1):
-        for ay in range(-1, 1):
+    for ax in range(-1, 2):
+        for ay in range(-1, 2):
+            # we want the four cardinal directions.
+            if abs(ax) == abs(ay):
+                continue
+
             # ax and ay give us our scan directions and which edge we are to examine.
-            for sample in range(sample_density):
-                # draw lines.
-                x = width_step * sample * ax
-                y = height_step * sample * ay
-                ray = cast_ray_cv(img, (x, y), (ax, ay))
+            for sample in range(1, sample_density):
+                # when we ray-cast, the x/y is determined by first checking which direction we are
+                # traversing.
+                x, y = 0, 0
+                if abs(ax):
+                    # we are either going forward or backward along the x axis,
+                    # meaning that the y axis will change with the sample and the
+                    # x axis will either be the left or right edge.
+                    x = 0 if ax == -1 else width
+                    y = sample * height_step
+                    if y == 0:
+                        continue  # no reason to traverse the edge
+                else:
+                    # we are moving up or down along the y-axis
+                    x = sample * width_step
+                    y = 0 if ay == -1 else height
+                    if x == 0:
+                        continue
+
+                ray = cast_ray_cv(gray_img, (x, y), (ax, ay), threshold)
+
                 if ray is not None:
-                    cv2.line(img, (x, y), ray, (0, 0, 255), 2)
+                    cv2.line(img, (y, x), ray, (0, 0, 255), 1)
 
 
 def _data_in_frame_center(frame: MatLike, threshold=10):
@@ -97,10 +130,5 @@ async def data_in_frame_center(frame: MatLike, **kwargs):
     return await asyncio.to_thread(_data_in_frame_center, frame, **kwargs)
 
 
-async def draw_border_lines(frame: MatLike, threshold=10, tolerance=5):
-    return await asyncio.to_thread(
-        _draw_border_lines,
-        frame,
-        threshold=threshold,
-        tolerance=tolerance,
-    )
+async def draw_border_lines(frame: MatLike, **kwargs):
+    return await asyncio.to_thread(_draw_border_lines, frame, **kwargs)
